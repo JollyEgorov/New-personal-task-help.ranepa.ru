@@ -9,9 +9,9 @@ FORM_URL = "https://help.ranepa.ru/record/itsm_spb_personal_task"
 
 # --- Таймауты (секунды). Везде — минимум, достаточный для реакции UI ---
 TIMEOUT_LOGIN_FIELD = 7
-TIMEOUT_DEFAULT = 4
-TIMEOUT_DROPDOWN = 6
-TIMEOUT_SELECT = 6
+TIMEOUT_DEFAULT = 6
+TIMEOUT_DROPDOWN = 8
+TIMEOUT_SELECT = 8
 TIMEOUT_SHORT = 0.5
 TIMEOUT_FORM_AFTER_LOGIN = 7
 POLL_FAST = 0.03
@@ -43,6 +43,10 @@ LOGIN_BUTTON_TEXTS = [
 # --- Общее количество полей для отчёта ---
 TOTAL_FIELDS = 8
 
+# --- Повторные проходы по полям ---
+FIELD_RETRY_ATTEMPTS = 3          # сколько раз пробовать поле
+FIELD_RETRY_DELAY = 0.6           # пауза между попытками
+
 # --- Параллелизм ---
-MAX_PARALLEL = 4
+MAX_PARALLEL = 10
 LOCK_TIMEOUT = 120

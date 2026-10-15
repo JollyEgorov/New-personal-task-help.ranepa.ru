@@ -114,3 +114,22 @@ def click_via_js(driver, element):
         return True
     except Exception:
         return False
+
+def safe_get_text(element):
+    """Безопасно достаёт текст/значение элемента."""
+    try:
+        tag = (element.tag_name or "").lower()
+        if tag in ("input", "textarea"):
+            return (element.get_attribute("value") or "").strip()
+        return (element.text or "").strip()
+    except Exception:
+        return ""
+
+
+def element_exists(driver, xpath, timeout=0.5):
+    """Быстрая проверка наличия элемента без ожидания."""
+    try:
+        els = driver.find_elements(By.XPATH, xpath)
+        return els[0] if els else None
+    except Exception:
+        return None

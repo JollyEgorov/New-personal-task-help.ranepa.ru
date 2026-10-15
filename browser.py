@@ -15,7 +15,6 @@ from logger import setup_logger
 
 log = setup_logger()
 
-
 def create_driver(headless=False):
     """Создаёт Chrome WebDriver с временным профилем (по умолчанию у Chrome)."""
     options = webdriver.ChromeOptions()
@@ -29,48 +28,18 @@ def create_driver(headless=False):
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-features=Translate,BackForwardCache,ServiceWorker")
     options.add_argument("--disable-gpu")
+    options.add_argument("--disable-software-rasterizer")
+    options.add_argument("--disable-accelerated-2d-canvas")
     options.add_argument("--log-level=3")
+
+    # Ключевой флаг: Chrome не закрывается при завершении chromedriver
+    options.add_argument("--detach")
 
     if headless:
         options.add_argument("--headless=new")
 
-    driver = webdriver.Chrome(
-        options=options,
-        service=ChromeService(),
-    )
+    service = ChromeService()
+    
+    driver = webdriver.Chrome(options=options, service=service)
     driver.set_page_load_timeout(30)
     return driver
-
-
-def wait_for_browser_close(driver, poll_interval=0.3):
-    """Блокирует выполнение, пока пользователь не закроет окно браузера."""
-    try:
-        while True:
-            try:
-                _ = driver.current_url
-            except Exception:
-                log.info("\n\nБраузер закрыт. Завершение работы...")
-                break
-            if not driver.window_handles:
-                log.info("\n\nОкно браузера закрыто. Завершение работы...")
-                break
-            time.sleep(poll_interval)
-    except KeyboardInterrupt:
-        log.info("\n\nЗавершение по Ctrl+C...")
-
-
-def _hard_exit(driver=None):
-    """Корректно завершает драйвер и процесс без висящих потоков."""
-    if driver is not None:
-        try:
-            driver.quit()
-        except Exception:
-            pass
-
-    try:
-        sys.stdout.flush()
-        sys.stderr.flush()
-    except Exception:
-        pass
-
-    os._exit(0)
