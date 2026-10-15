@@ -2,6 +2,7 @@
 Заполнение полей формы заявки.
 """
 
+import time
 import random
 from datetime import datetime
 
@@ -58,9 +59,23 @@ def select_from_dropdown(driver, field_container, timeout=TIMEOUT_DROPDOWN):
     except Exception:
         return click_via_js(driver, item)
 
+def _close_any_dropdown(driver):
+    """Пытается закрыть любой открытый дропдаун/оверлей."""
+    try:
+        from selenium.webdriver.common.action_chains import ActionChains
+        ActionChains(driver).send_keys(Keys.ESCAPE).perform()
+    except Exception:
+        pass
+    time.sleep(0.15)
 
 def _select_custom_option(driver, field_test_id, target_text):
-    """Общая логика для custom-select (Статус, Срочность)."""
+    """Общая логика для custom-select (Статус, Срочность).
+    Устойчива к element click intercepted."""
+    from selenium.webdriver.common.action_chains import ActionChains
+
+    # Сначала закрываем возможные оверлеи от предыдущих полей
+    _close_any_dropdown(driver)
+
     try:
         field = WebDriverWait(driver, TIMEOUT_SELECT, poll_frequency=POLL_FAST).until(
             EC.presence_of_element_located(
@@ -68,23 +83,41 @@ def _select_custom_option(driver, field_test_id, target_text):
             )
         )
         button = WebDriverWait(field, TIMEOUT_DEFAULT, poll_frequency=POLL_FAST).until(
-            EC.element_to_be_clickable(
+            EC.presence_of_element_located(
                 (By.XPATH, ".//button[@data-test='custom-select-button']")
             )
         )
-        button.click()
 
+        # Скроллим и кликаем через JS — обходит перехват оверлеем
+        driver.execute_script(
+            "arguments[0].scrollIntoView({block: 'center'});", button
+        )
+        time.sleep(0.1)
+
+        try:
+            button.click()
+        except Exception:
+            # fallback: JS-клик, если обычный перехвачен
+            driver.execute_script("arguments[0].click();", button)
+
+        # Ждём именно элемент списка, кликаем тоже через fallback
         item = WebDriverWait(driver, TIMEOUT_SELECT, poll_frequency=POLL_FAST).until(
-            EC.element_to_be_clickable(
+            EC.presence_of_element_located(
                 (By.XPATH,
                  f"//div[@data-test='custom-select-dropdown-item' "
                  f"and normalize-space(text())='{target_text}']")
             )
         )
-        item.click()
+        try:
+            item.click()
+        except Exception:
+            driver.execute_script("arguments[0].click();", item)
+
+        _close_any_dropdown(driver)
         return True
     except Exception as e:
-        log.error(f"    ✗ Ошибка выбора '{target_text}': {str(e)[:120]}")
+        log.error(f"    ✗ Ошибка выбора '{target_text}': {str(e)[:160]}")
+        _close_any_dropdown(driver)
         return False
 
 
@@ -204,12 +237,11 @@ def fill_reference_field(driver, field_test_id, data_line, description=""):
 
         if not select_from_dropdown(driver, field_container):
             log.warning("    ✗ Дропдаун не появился")
+            _close_any_dropdown(driver)
             return False
 
-        try:
-            input_field.send_keys(Keys.ESCAPE)
-        except Exception:
-            pass
+        # Закрываем дропдаун: ESC через ActionChains + клик по нейтральному месту
+        _close_any_dropdown(driver)
 
         log.info(f"  ✓ {description} - изменено")
         return True
@@ -351,3 +383,145 @@ def fill_text_field(driver, field_test_ids, search_text, description=""):
     except Exception as e:
         log.error(f"  ✗ {description}: {str(e)[:100]}")
         return False
+
+# ========== Проверка заполненности (read-only) ==========
+
+def _container_has_value(field_container) -> bool:
+    """
+    Универсальный признак «в поле что-то выбрано/введено».
+    Работает для reference-полей, custom-select и текстовых.
+    """
+    try:
+        # 1) input/textarea с непустым value
+        for inp in field_container.find_elements(By.XPATH, ".//input | .//textarea"):
+            val = (inp.get_attribute("value") or "").strip()
+            if val:
+                return True
+
+        # 2) чипы/теги/выбранные значения
+        for c in field_container.find_elements(
+            By.XPATH,
+            ".//*[contains(@class, 'Chip') or contains(@class, 'Tag') "
+            "or contains(@class, 'Value') or contains(@class, 'selected') "
+            "or contains(@class, 'SingleValue')]"
+        ):
+            if (c.text or "").strip():
+                return True
+
+        # 3) contenteditable с текстом
+        for ce in field_container.find_elements(
+            By.XPATH, ".//div[@contenteditable='true']"
+        ):
+            if (ce.text or "").strip():
+                return True
+
+        return False
+    except Exception:
+        return False
+
+
+def check_reference_filled(driver, field_test_id) -> bool:
+    """Проверяет, что reference-поле содержит значение."""
+    try:
+        container = driver.find_element(
+            By.XPATH, f"//div[@data-test='{field_test_id}']"
+        )
+        return _container_has_value(container)
+    except Exception:
+        return False
+
+
+def check_custom_select_filled(driver, field_test_id, expected_text=None) -> bool:
+    """Проверяет custom-select (Статус, Срочность)."""
+    try:
+        field = driver.find_element(
+            By.XPATH, f"//div[@data-test='{field_test_id}']"
+        )
+        button = field.find_element(
+            By.XPATH, ".//button[@data-test='custom-select-button']"
+        )
+        text = (button.text or "").strip()
+        if not text:
+            return False
+        if expected_text:
+            return expected_text.strip() in text
+        return True
+    except Exception:
+        return False
+
+
+def check_text_filled(driver, field_test_ids, expected_text=None) -> bool:
+    """Проверяет текстовое поле (Тема)."""
+    if isinstance(field_test_ids, str):
+        field_test_ids = [field_test_ids]
+
+    for test_id in field_test_ids:
+        for xp in (
+            f"//div[@data-test='{test_id}']",
+            f"//textarea[@data-test='{test_id}']",
+        ):
+            try:
+                container = driver.find_element(By.XPATH, xp)
+            except Exception:
+                continue
+
+            for inp in container.find_elements(By.XPATH, ".//input | .//textarea"):
+                val = (inp.get_attribute("value") or "").strip()
+                if val and (expected_text is None or expected_text.strip() in val):
+                    return True
+
+            txt = (container.text or "").strip()
+            if txt and (expected_text is None or expected_text.strip() in txt):
+                return True
+    return False
+
+
+def check_rich_text_filled(driver, field_test_id, expected_text=None) -> bool:
+    """Проверяет rich-text (Описание)."""
+    try:
+        wrapper = driver.find_element(
+            By.XPATH, f"//div[@data-test='{field_test_id}']"
+        )
+    except Exception:
+        return False
+
+    for ce in wrapper.find_elements(
+        By.XPATH, ".//div[@data-lexical-editor='true'] | .//div[@contenteditable='true']"
+    ):
+        txt = (ce.text or "").strip()
+        if txt and (expected_text is None or expected_text.strip() in txt):
+            return True
+    return False
+
+
+def check_datetime_filled(driver) -> bool:
+    """
+    Проверяет поле даты/времени.
+    Признак: в маске есть цифры даты, либо в hidden-input есть значение.
+    """
+    # По маске
+    try:
+        masks = driver.find_elements(
+            By.XPATH, "//span[contains(@class, 'TabMask')]"
+        )
+        for m in masks:
+            txt = (m.text or "").strip()
+            if txt and any(ch.isdigit() for ch in txt):
+                # dd.mm.yyyy — минимум 8 цифр
+                if sum(ch.isdigit() for ch in txt) >= 8:
+                    return True
+    except Exception:
+        pass
+
+    # По hidden input
+    try:
+        for inp in driver.find_elements(
+            By.XPATH,
+            "//input[@type='number' and contains(@class, 'HiddenInput')]",
+        ):
+            if (inp.get_attribute("value") or "").strip():
+                return True
+    except Exception:
+        pass
+
+    return False

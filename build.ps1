@@ -27,7 +27,8 @@ Remove-Item -Path "build", "dist" -Recurse -ErrorAction SilentlyContinue
 Remove-Item -Path "*.spec" -ErrorAction SilentlyContinue
 
 Write-Host "Собираю EXE..." -ForegroundColor Yellow
-python -m PyInstaller --onefile --console `
+python -m PyInstaller --onefile --windowed `
+  --collect-all=selenium `
   --name "ranepa_automation" `
   main.py
 
